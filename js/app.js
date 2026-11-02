@@ -339,18 +339,25 @@ async function submitQuizResult(stageId, category, isCorrect, triesCount) {
 // [팀원 B 파트] 서버에서 LLM 맞춤형 문제를 받아와 화면에 렌더링하는 함수
 // [수정된 최신 버전] 서버에서 LLM 맞춤형 문제를 받아와 화면(만화/문제 화면)에 곧바로 렌더링하는 함수
 async function loadCustomQuiz() {
-  try {
-    const userId = (typeof me !== 'undefined' && me) ? me.email : 'guest';
-    const weakCategory = '전세 계약';
 
+  try {
+    const userId = (typeof me !== 'undefined' && me && me.email) ? me.email : 'guest';
+    
     console.log('AI 맞춤형 문제를 생성하는 중입니다...');
-    toast('AI가 맞춤형 문제를 만드는 중이에요...');
+    toast('AI가 맞춤형 문항을 구성하고 있어요 (약간의 시간이 걸려요)...');
+
+    // ⏳ 타임아웃을 넉넉하게 60초(60000ms)로 늘리거나 커스텀 AbortController 설정
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); 
 
     const response = await fetch('/api/quiz/custom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, weak_category: weakCategory })
+      body: JSON.stringify({ user_id: userId }),
+      signal: controller.signal // 타임아웃 제어 연결
     });
+
+    clearTimeout(timeoutId); // 응답이 오면 타이머 해제
 
     const result = await response.json();
 
@@ -358,36 +365,36 @@ async function loadCustomQuiz() {
       const qz = result.quiz;
       console.log('맞춤형 문제 로드 성공:', qz);
 
-      const customStageId = qz.id;
+      const customStageId = qz.id || 'custom_quiz_1';
       
-      // 만화(comic) 속 캐릭터 에러를 피하기 위해 빈 만화 배열을 사용하거나 텍스트로 대체
       const customStageData = {
         id: customStageId,
-        title: qz.title,
+        title: qz.title || 'AI 맞춤 복습 문제',
         q: qz.q,
-        comic: [], // 만화 패널 생략
+        comic: [], 
         opts: qz.opts,
         explain: qz.explain,
         laws: qz.laws,
         clues: [
-          { id: 'c1', label: '핵심 법령 확인', hint: '어떤 법령이 적용되는지 확인해보세요.', kw: ['법령', '조항'], fact: qz.explain, reveal: qz.explain }
+          { id: 'c1', label: '핵심 법령 확인', hint: '적용되는 법령 조항을 확인해보세요.', kw: ['법령', '조항'], fact: qz.explain, reveal: qz.explain }
         ]
       };
 
-      ALL_STAGES.push({ c: { name: 'AI 맞춤 코스', id: 'custom' }, ch: { title: '복습 챕터' }, s: customStageData, i: 0 });
+      ALL_STAGES.push({ c: { name: 'AI 맞춤 코스', id: 'custom' }, ch: { title: '취약점 집중 복습' }, s: customStageData, i: 0 });
 
       run = { sid: customStageId, left: MAXQ, found: [], log: [], asked: [], tries: [], extra: 0 };
       
       $('sTag').textContent = 'AI 맞춤형 복습 코너';
       $('sTitle').textContent = qz.title;
-      $('sComic').innerHTML = '<div class="card" style="text-align:center;padding:24px"><p><b>🤖 AI 맞춤 복습 문제</b></p><p class="sub" style="margin-top:6px">이전에 틀렸던 개념을 바탕으로 생성된 문제입니다.</p></div>';
+      $('sComic').innerHTML = '<div class="card" style="text-align:center;padding:24px"><p><b>🤖 AI 맞춤 복습 문제</b></p><p class="sub" style="margin-top:6px">이전에 틀렸던 학습 기록을 바탕으로 출제된 문제입니다.</p></div>';
       $('sQ').textContent = qz.q;
       
       go('stage');
       toast('맞춤형 문제가 준비되었어요!');
 
     } else {
-      alert('맞춤형 문제를 불러오는 데 실패했습니다.');
+      // 403 에러(학습 기록 부족 등)인 경우 서버가 보낸 에러 메시지 출력
+      alert(result.error || '맞춤형 문제를 불러오는 데 실패했습니다. 학습을 더 진행해 주세요!');
     }
 
   } catch (error) {
