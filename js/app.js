@@ -6,7 +6,7 @@ const LS = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
-function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2000); }
+function toast(m, ms=2000){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),ms); }
 const ALL_STAGES = [];
 COURSES.forEach(c => c.chapters.forEach(ch => ch.stages.forEach((s, i) => ALL_STAGES.push({c, ch, s, i}))));
 const findStage = id => ALL_STAGES.find(x => x.s.id === id);
@@ -696,18 +696,25 @@ function openReel(list, after){
   $('player').hidden = false;
   drawReel(); tickReel();
 }
-const DUR = 6000;
+const DUR = 6000;         // 글 슬라이드 한 장 길이
+const DUR_IMG = 12000;    // 만화 슬라이드는 말풍선을 읽을 시간이 필요해서 더 길게
+const slideDur = sl => sl.img ? DUR_IMG : DUR;
 function drawReel(){
   const r = reel, cur = r.slides[r.idx], same = r.slides.filter(x=>x.ch===cur.ch);
-  $('player').innerHTML = `<div class="reel c-${cur.c.id}" role="dialog" aria-label="배경지식 쇼츠">
+  const last = r.idx===r.slides.length-1;
+  // 만화(img)가 있는 슬라이드는 그림을 보여주고, 글 내용은 화면 낭독기·읽어주기용으로만 남긴다
+  const slideHtml = cur.sl.img
+    ? `<div class="slide comic" aria-live="polite"><img src="${esc(cur.sl.img)}" alt="${esc(cur.sl.k)} 만화: ${esc(cur.sl.big.replace(/\n/g,' '))}. ${esc(cur.sl.body)}"></div>`
+    : `<div class="slide" aria-live="polite"><div class="k">${esc(cur.sl.k)}</div><div class="big">${esc(cur.sl.big)}</div><div class="body">${esc(cur.sl.body)}</div>${cur.sl.viz?`<div class="viz">${cur.sl.viz.map(v=>`<span>${esc(v)}</span>`).join('')}</div>`:''}</div>`;
+  $('player').innerHTML = `<div class="reel c-${cur.c.id}${cur.sl.img?' has-comic':''}${last?' has-btn':''}"${cur.sl.img?` style="--comic-bg:url('${cur.sl.img}')"`:''} role="dialog" aria-label="배경지식 쇼츠">
     <div class="bars">${same.map((x,i)=>`<i><span id="bar${i}" style="width:${i<cur.i?100:0}%"></span></i>`).join('')}</div>
-    <div class="top"><span>${esc(cur.c.name)} · ${esc(cur.ch.title.split(':')[0])}</span><button onclick="closeReel(true)">건너뛰기 ✕</button></div>
+    <div class="top"><span>${esc(cur.c.name)} · ${esc(cur.ch.title.split(':')[0])}</span><div class="topbtns">${cur.sl.img ? `<button onclick="togglePause()" id="rPause" aria-label="${r.paused?'재생':'일시정지'}">${pauseLabel(r.paused, true)}</button><button onclick="toggleSound()" aria-label="읽어주기 ${r.sound?'끄기':'켜기'}">${r.sound?'🔊':'🔈'}</button>` : ''}<button onclick="closeReel(true)">건너뛰기 ✕</button></div></div>
     <button class="tapL" aria-label="이전" onclick="stepReel(-1)"></button><button class="tapR" aria-label="다음" onclick="stepReel(1)"></button>
-    <div class="slide" aria-live="polite"><div class="k">${esc(cur.sl.k)}</div><div class="big">${esc(cur.sl.big)}</div><div class="body">${esc(cur.sl.body)}</div>${cur.sl.viz?`<div class="viz">${cur.sl.viz.map(v=>`<span>${esc(v)}</span>`).join('')}</div>`:''}</div>
+    ${slideHtml}
     <div class="wm">Law-Kick</div>
     <div class="bottom">
-      <div class="ctrl"><button onclick="togglePause()" id="rPause">${r.paused?'▶ 재생':'❚❚ 일시정지'}</button><button onclick="toggleSound()">${r.sound?'🔊 읽어주기 켬':'🔈 읽어주기'}</button></div>
-      ${r.idx===r.slides.length-1 ? `<button class="btn" onclick="closeReel(true)">${r.after?'이제 문제 풀러 가기':'다 봤어요'}</button>` : ''}
+      ${cur.sl.img ? '' : `<div class="ctrl"><button onclick="togglePause()" id="rPause">${pauseLabel(r.paused, false)}</button><button onclick="toggleSound()">${r.sound?'🔊 읽어주기 켬':'🔈 읽어주기'}</button></div>`}
+      ${last ? `<button class="btn" onclick="closeReel(true)">${r.after?'이제 문제 풀러 가기':'다 봤어요'}</button>` : ''}
     </div></div>`;
   speak(cur.sl);
 }
@@ -717,12 +724,22 @@ function tickReel(){
     if(!reel || reel.paused) return;
     reel.t += 100;
     const cur = reel.slides[reel.idx], b = $('bar'+cur.i);
-    if(b) b.style.width = Math.min(100, reel.t/DUR*100)+'%';
-    if(reel.t >= DUR){ if(reel.idx < reel.slides.length-1) stepReel(1); else { reel.paused = true; } }
+    const dur = slideDur(cur.sl);
+    if(b) b.style.width = Math.min(100, reel.t/dur*100)+'%';
+    if(reel.t >= dur){ if(reel.idx < reel.slides.length-1) stepReel(1); else { reel.paused = true; showReelEnd(); } }
   }, 100);
 }
-function stepReel(d){ const n = reel.idx+d; if(n<0 || n>=reel.slides.length) return; reel.idx=n; reel.t=0; drawReel(); }
-function togglePause(){ reel.paused=!reel.paused; $('rPause').textContent = reel.paused?'▶ 재생':'❚❚ 일시정지'; }
+function stepReel(d){ const n = reel.idx+d; if(n>=reel.slides.length) showReelEnd(); if(n<0 || n>=reel.slides.length) return; reel.idx=n; reel.t=0; drawReel(); }
+// 만화 슬라이드는 '마지막 버튼'이 아래 자막을 가리지 않게, 다 보거나 한 번 더 넘길 때 나타낸다
+function showReelEnd(){ document.querySelector('#player .reel')?.classList.add('ended'); }
+function pauseLabel(paused, compact){ return compact ? (paused?'▶':'❚❚') : (paused?'▶ 재생':'❚❚ 일시정지'); }
+function togglePause(){
+  reel.paused=!reel.paused;
+  const b = $('rPause'); if(!b) return;
+  const compact = !!reel.slides[reel.idx].sl.img;
+  b.textContent = pauseLabel(reel.paused, compact);
+  if(compact) b.setAttribute('aria-label', reel.paused?'재생':'일시정지');
+}
 function toggleSound(){ reel.sound=!reel.sound; if(!reel.sound) try{speechSynthesis.cancel()}catch(e){} drawReel(); }
 function speak(sl){
   if(!reel.sound) return;
@@ -738,12 +755,32 @@ function closeReel(markSeen){
 }
 document.addEventListener('keydown', e => { if(!reel) return; if(e.key==='ArrowRight') stepReel(1); if(e.key==='ArrowLeft') stepReel(-1); if(e.key==='Escape') closeReel(true); if(e.key===' '){ e.preventDefault(); togglePause(); } });
 function renderShorts(){
+  // 썸네일 그림: 열린 챕터는 thumb, 잠긴 챕터는 thumbLock(자물쇠가 그려진 흑백 그림).
+  // 그림이 없으면(예: 잠금 그림만 있는 챕터가 열렸을 때) 예전처럼 코스 색 카드로 그린다.
+  // 카드 위 글자는 '시청함' 표시만 남기고, 잠긴 카드는 누르면 안내 문구를 띄운다.
+  const imgCard = (src, title) => `<img src="${esc(src)}" alt="" loading="lazy"><span class="vh">${esc(title)}</span>`;
   $('shList').innerHTML = COURSES.map(c => `<div class="stack" style="gap:8px"><h3>${c.name}</h3><div class="sgrid">${c.chapters.map((ch, ci) => {
-    if(ch.locked) return `<div class="thumb c-${c.id} lock"><small>챕터 ${ci+1}</small><b>${esc(ch.title)}</b><small>준비 중</small></div>`;
+    if(ch.locked){
+      const attrs = `onclick="lockedShort(${ci})" aria-label="챕터 ${ci+1} ${esc(ch.title)} 쇼츠 (잠김: 챕터 ${ci}${eulReul(ci)} 먼저 클리어하세요)"`;
+      if(ch.thumbLock) return `<button class="thumb has-img lock-img c-${c.id}" ${attrs}>${imgCard(ch.thumbLock, ch.title)}</button>`;
+      return `<button class="thumb c-${c.id} lock" ${attrs}><small>챕터 ${ci+1}</small><b>${esc(ch.title)}</b><small></small></button>`;
+    }
     const open = pg.seen[ch.id] || chapterOpen(c, ci);
-    return `<button class="thumb c-${c.id} ${open?'':'lock'}" ${open?`onclick="playShorts('${ch.id}')"`:'disabled'} aria-label="${esc(ch.title)} 쇼츠"><small>챕터 ${ci+1}</small>${pg.seen[ch.id]?'<span class="seen">시청함</span>':''}<b>${esc(ch.shorts[0].big.replace(/\n/g,' '))}</b><small>${open?`▶ ${ch.shorts.length}컷 · 약 ${Math.round(ch.shorts.length*DUR/1000)}초`:'🔒 이전 챕터 클리어 후'}</small></button>`;
+    const pic = open ? ch.thumb : ch.thumbLock;
+    const attrs = open
+      ? `onclick="playShorts('${ch.id}')" aria-label="챕터 ${ci+1} ${esc(ch.title)} 쇼츠"`
+      : `onclick="lockedShort(${ci})" aria-label="챕터 ${ci+1} ${esc(ch.title)} 쇼츠 (잠김: 챕터 ${ci}${eulReul(ci)} 먼저 클리어하세요)"`;
+    const seen = pg.seen[ch.id] ? '<span class="seen">시청함</span>' : '';
+    if(pic) return `<button class="thumb has-img ${open?'':'lock-img'} c-${c.id}" ${attrs}>${imgCard(pic, ch.title)}${seen}</button>`;
+    return `<button class="thumb c-${c.id} ${open?'':'lock'}" ${attrs}><small>챕터 ${ci+1}</small>${seen}<b>${esc(ch.shorts[0].big.replace(/\n/g,' '))}</b><small></small></button>`;
   }).join('')}</div></div>`).join('');
 }
+// 잠긴 쇼츠를 눌렀을 때 안내
+function lockedShort(prevNo){
+  toast(`앗, 아직 잠겨 있어요! 🔒 챕터 ${prevNo}${eulReul(prevNo)} 먼저 클리어하면 짠~ 하고 열려요 😆`, 3200);
+}
+// 숫자 뒤 을/를 (1을, 2를, 3을 …)
+function eulReul(n){ return [2,4,5,9].includes(n % 10) ? '를' : '을'; }
 
 /* ═════════ 랭킹 ═════════ */
 const SAMPLE_RIVALS = [['예시) 보증금지킴이',640],['예시) 알바왕',480],['예시) 사기감별사',350],['예시) 첫출근',210],['예시) 계약새내기',90]];
