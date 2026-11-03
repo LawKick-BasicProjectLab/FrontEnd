@@ -23,8 +23,54 @@ function loadProgress(){
   saveProgress();
 }
 function saveProgress(){ LS.set('lk_prog_'+me.email, pg); syncRank(); }
-function startSession(acc){
-  me = acc; LS.set('lk_session', acc.email); loadProgress(); go('home');
+async function startSession(acc){
+  me = acc; LS.set('lk_session', acc.email); loadProgress();
+  // 홈을 그리기 전에 서버 클리어 기록과 맞춘다 (vercel dev 첫 호출은 함수 컴파일 때문에 느릴 수 있음)
+  const synced = await syncClearsFromServer(8000);
+  go('home');
+  if(!synced && !acc.guest){
+    // 첫 시도가 실패하면 잠시 뒤 한 번 더. 성공하면 보고 있는 화면을 다시 그린다
+    setTimeout(async () => {
+      if(me !== acc) return;
+      if(await syncClearsFromServer(15000)) rerenderCurrent();
+    }, 2000);
+  }
+}
+function rerenderCurrent(){
+  const cur = [...document.querySelectorAll('.screen')].find(el => !el.hidden)?.id;
+  if(cur === 'home' || cur === 'my') go(cur, true);
+}
+// 서버(stage_clears)를 기준으로 pg.cleared 를 맞춘다.
+// - 맞춤 문제 해금 등 서버 판정과 화면 표시가 어긋나지 않게 하기 위함
+// - 서버 응답이 실패하거나 3초 안에 안 오면 이 기기 기록 그대로 진행한다
+async function syncClearsFromServer(timeoutMs = 8000){
+  if(!me || me.guest) return true;
+  const email = me.email;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try{
+    const res = await fetch('/api/user/me?user_id=' + encodeURIComponent(email), { signal: controller.signal });
+    const result = await res.json();
+    if(!res.ok || !result.success) throw new Error(result.error || ('HTTP ' + res.status));
+    if(!me || me.email !== email) return false;   // 기다리는 사이 로그아웃·계정 전환된 경우
+
+    const next = {};
+    for(const c of (result.data.cleared || [])){
+      if(findStage(c.stage_id)) next[c.stage_id] = { grade: c.grade, at: String(c.cleared_at).slice(0,10) };
+    }
+    const removed = Object.keys(pg.cleared).filter(id => !next[id]).length;
+    const added = Object.keys(next).filter(id => !pg.cleared[id]).length;
+    pg.cleared = next;
+    saveProgress();
+    if(removed) toast(`서버 기록과 맞춰서 ${removed}개 단계의 클리어 표시가 해제됐어요`);
+    else if(added) toast(`서버에 저장된 ${added}개 단계를 불러왔어요`);
+    return true;
+  }catch(e){
+    console.warn('서버 클리어 기록 동기화 실패 — 이 기기 기록으로 진행합니다:', e);
+    return false;
+  }finally{
+    clearTimeout(timeoutId);
+  }
 }
 function accounts(){ return LS.get('lk_accounts', {}); }
 
@@ -69,7 +115,27 @@ function resetMe(){
   box.innerHTML = `<div class="box"><h2>진행 기록을 초기화할까요?</h2><p class="sub">경험치, 코인, 클리어 기록이 모두 처음으로 돌아가요.</p><button class="btn hot" id="mYes">초기화</button><button class="btn line" id="mNo">취소</button></div>`;
   box.hidden=false;
   $('mNo').onclick=()=>box.hidden=true;
-  $('mYes').onclick=()=>{ pg=freshProgress(); pg.visits=[today()]; saveProgress(); box.hidden=true; renderMy(); toast('기록을 초기화했어요'); };
+  $('mYes').onclick = async () => {
+    // 서버 기록도 함께 지운다. 로컬만 지우면 다음 로그인 동기화 때 클리어가 되살아나고, 다시 깨도 XP가 안 들어온다.
+    if(!me.guest){
+      $('mYes').disabled = true;
+      try{
+        const res = await fetch('/api/user/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: me.email })
+        });
+        const result = await res.json();
+        if(!res.ok || !result.success) throw new Error(result.error || ('HTTP ' + res.status));
+      }catch(e){
+        console.error('서버 기록 초기화 실패:', e);
+        box.hidden = true;
+        toast('서버 연결 문제로 초기화하지 못했어요. 잠시 후 다시 시도해 주세요');
+        return;   // 서버와 어긋나지 않도록 로컬도 그대로 둔다
+      }
+    }
+    pg=freshProgress(); pg.visits=[today()]; saveProgress(); box.hidden=true; renderMy(); toast('기록을 초기화했어요');
+  };
 }
 
 /* ═════════ 레벨 & 보상 ═════════ */
@@ -77,13 +143,17 @@ const LVNAME = ['','법알못','계약 입문','계약 새싹','권리 지킴이
 function level(xp){ const lv=Math.floor(xp/100)+1; return {lv, name:LVNAME[Math.min(lv,LVNAME.length-1)], next:100-xp%100, pct:xp%100}; }
 function dayN(){ const a=new Date(me.created+'T00:00:00'), b=new Date(today()+'T00:00:00'); return Math.round((b-a)/864e5)+1; }
 function clearedCount(){ return Object.keys(pg.cleared).length; }
+// AI 맞춤 단계(custom)는 학습 기록이 쌓여야 열리는 보너스라서, 다음 챕터 해금·챕터 클리어 조건에는 넣지 않는다.
+const requiredStages = ch => ch.stages.filter(s => !s.custom);
 function stageOpen(id){
   const x = findStage(id); if(!x) return false;
   const chs = x.c.chapters, ci = chs.indexOf(x.ch);
-  if(ci>0 && !chs[ci-1].stages.every(s=>pg.cleared[s.id])) return false;
+  if(ci>0 && !requiredStages(chs[ci-1]).every(s=>pg.cleared[s.id])) return false;
+  // AI 맞춤 단계는 서버 해금 규칙(/api/quiz/custom)과 같게: 같은 챕터의 일반 단계를 모두 클리어해야 열린다
+  if(x.s.custom) return requiredStages(x.ch).every(s=>pg.cleared[s.id]);
   return x.i===0 || !!pg.cleared[x.ch.stages[x.i-1].id];
 }
-function chapterOpen(c, ci){ return !c.chapters[ci].locked && (ci===0 || c.chapters[ci-1].stages.every(s=>pg.cleared[s.id])); }
+function chapterOpen(c, ci){ return !c.chapters[ci].locked && (ci===0 || requiredStages(c.chapters[ci-1]).every(s=>pg.cleared[s.id])); }
 
 /* ═════════ 화면 전환 ═════════ */
 const TABS = {home:'home', course:'home', stage:'home', play:'home', answer:'home', feedback:'home', shorts:'shorts', rank:'rank', my:'my'};
@@ -98,7 +168,7 @@ function go(id, keep){
 }
 
 /* ═════════ 홈 ═════════ */
-function nextStage(){ return ALL_STAGES.find(x => !pg.cleared[x.s.id] && stageOpen(x.s.id)); }
+function nextStage(){ return ALL_STAGES.find(x => !x.s.custom && !pg.cleared[x.s.id] && stageOpen(x.s.id)); }
 function courseProgress(c){ const all=c.chapters.flatMap(ch=>ch.stages); return {done:all.filter(s=>pg.cleared[s.id]).length, total:all.length}; }
 function renderHome(){
   const L = level(pg.xp);
@@ -126,8 +196,8 @@ function openCourse(cid){
     const open = chapterOpen(c, ci);
     const nodes = ch.stages.map((s, si) => {
       const done = !!pg.cleared[s.id], op = stageOpen(s.id);
-      const tag = done ? `<span class="pill good">${pg.cleared[s.id].grade}</span>` : op ? `<span class="pill">도전</span>` : `<span class="pill mute">잠김</span>`;
-      return `<button class="node ${done?'clear':op?'open':''}" ${op?'':'disabled'} onclick="openStageFlow('${s.id}')"><span class="dot">${done?'✓':si+1}</span><span><b>${esc(s.title)}</b><br><span class="sub">${si+1}단계 · 보상 30 XP + 10 코인</span></span>${tag}</button>`;
+      const tag = done ? `<span class="pill good">${pg.cleared[s.id].grade}</span>` : op ? (s.custom ? `<span class="pill gold">AI</span>` : `<span class="pill">도전</span>`) : `<span class="pill mute">잠김</span>`;
+      return `<button class="node ${s.custom?'ai ':''}${done?'clear':op?'open':''}" ${op?'':'disabled'} onclick="openStageFlow('${s.id}')"><span class="dot">${done?'✓':s.custom?'AI':si+1}</span><span><b>${esc(s.title)}</b><br><span class="sub">${s.custom?`${si+1}단계 · 내 오답 기록으로 AI가 만드는 보너스 문제`:`${si+1}단계 · 보상 30 XP + 10 코인`}</span></span>${tag}</button>`;
     }).join('');
     return `<div class="chap ${open?'':'locked'}"><div class="row between"><span class="label">챕터 ${ci+1}</span>${open?`<button class="shortbtn" onclick="playShorts('${ch.id}')">▶ 배경지식 쇼츠</button>`:'<span class="pill mute">이전 챕터를 먼저 클리어</span>'}</div><h3 style="margin-top:4px">${ch.title}</h3><div class="path">${nodes}</div></div>`;
   }).join('');
@@ -215,10 +285,9 @@ let run = null;
 function openStage(sid){
   const x = findStage(sid); cur.stage = sid;
 
-  if (x && x.i === 3) {
-    // 사용자의 취약 카테고리나 이메일을 인자로 전달하여 맞춤형 문제 생성 API 호출
-    loadCustomQuiz(me ? me.email : 'guest', '전세 계약');
-    return; // 기존 일반 스테이지 로직 대신 맞춤형 퀴즈 흐름으로 태울 때 사용
+  if (x.s.custom) {            // 각 챕터 4단계 = AI 맞춤 문제
+    loadCustomQuiz(sid);
+    return;
   }
 
   run = {sid, left:MAXQ, found:[], log:[], asked:[], tries:[], extra:0};
@@ -314,7 +383,7 @@ async function fetchCustomQuiz(userId, weakCategory) {
 }
 
 // js/app.js 파일 내부에 추가할 서버 전송 함수
-async function submitQuizResult(stageId, category, isCorrect, triesCount) {
+async function submitQuizResult(stageId, category, isCorrect, triesCount, cluesFound, questionsLeft, localXp = 0) {
   try {
     const response = await window.fetch('/api/quiz/submit', {
       method: 'POST',
@@ -324,83 +393,134 @@ async function submitQuizResult(stageId, category, isCorrect, triesCount) {
         stage_id: stageId,
         category: category,
         is_correct: isCorrect,
-        tries_count: triesCount
+        tries_count: triesCount,
+        clues_found: cluesFound,       // 찾은 단서 수 → 서버 등급(S) 계산용
+        questions_left: questionsLeft  // 남은 질문 수 → 서버 XP 계산용
       }),
     });
     const result = await response.json();
     if (result.success) {
       console.log('서버에 학습 기록 저장 성공:', result.data);
+      reconcileWithServer(stageId, result.data, localXp);
     }
   } catch (error) {
     console.error('서버 통신 실패:', error);
   }
 }
 
-// [팀원 B 파트] 서버에서 LLM 맞춤형 문제를 받아와 화면에 렌더링하는 함수
-// [수정된 최신 버전] 서버에서 LLM 맞춤형 문제를 받아와 화면(만화/문제 화면)에 곧바로 렌더링하는 함수
-async function loadCustomQuiz() {
+// 서버가 '처음 클리어'인지 최종 판정한다. 프론트가 준 XP·등급이 서버와 다르면 서버 쪽으로 맞춘다.
+// (예: 동기화 실패로 이 기기엔 클리어 기록이 없었지만 서버엔 이미 있었던 경우 → 서버는 XP 0)
+function reconcileWithServer(stageId, data, localXp) {
+  if (!data || !data.saved || !pg || !me || me.email !== data.user_id) return;
+  let changed = false;
+  if (typeof data.xp_gained === 'number' && data.xp_gained !== localXp) {
+    pg.xp = Math.max(0, pg.xp + data.xp_gained - localXp);
+    changed = true;
+    if (data.first_clear === false && localXp > 0) toast('이미 서버에 클리어 기록이 있는 단계라 XP는 다시 주지 않아요');
+  }
+  if (data.grade && pg.cleared[stageId] && pg.cleared[stageId].grade !== data.grade) {
+    pg.cleared[stageId].grade = data.grade;
+    changed = true;
+  }
+  if (changed) { saveProgress(); rerenderCurrent(); }
+}
 
+// '정답과 해설 보기'로 넘어간 단계도 서버에 C등급 클리어로 남긴다 (안 남기면 다음 로그인 동기화 때 사라짐)
+async function submitReveal(stageId, category, localXp = 0) {
+  if (!me || me.guest) return;
   try {
-    const userId = (typeof me !== 'undefined' && me && me.email) ? me.email : 'guest';
-    
-    console.log('AI 맞춤형 문제를 생성하는 중입니다...');
-    toast('AI가 맞춤형 문항을 구성하고 있어요 (약간의 시간이 걸려요)...');
-
-    // ⏳ 타임아웃을 넉넉하게 60초(60000ms)로 늘리거나 커스텀 AbortController 설정
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); 
-
-    const response = await fetch('/api/quiz/custom', {
+    const response = await fetch('/api/quiz/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
-      signal: controller.signal // 타임아웃 제어 연결
+      body: JSON.stringify({
+        user_id: me.email,
+        stage_id: stageId,
+        category: category,
+        is_correct: false,
+        revealed: true
+      }),
     });
-
-    clearTimeout(timeoutId); // 응답이 오면 타이머 해제
-
     const result = await response.json();
-
-    if (result.success && result.quiz) {
-      const qz = result.quiz;
-      console.log('맞춤형 문제 로드 성공:', qz);
-
-      const customStageId = qz.id || 'custom_quiz_1';
-      
-      const customStageData = {
-        id: customStageId,
-        title: qz.title || 'AI 맞춤 복습 문제',
-        q: qz.q,
-        comic: [], 
-        opts: qz.opts,
-        explain: qz.explain,
-        laws: qz.laws,
-        clues: [
-          { id: 'c1', label: '핵심 법령 확인', hint: '적용되는 법령 조항을 확인해보세요.', kw: ['법령', '조항'], fact: qz.explain, reveal: qz.explain }
-        ]
-      };
-
-      ALL_STAGES.push({ c: { name: 'AI 맞춤 코스', id: 'custom' }, ch: { title: '취약점 집중 복습' }, s: customStageData, i: 0 });
-
-      run = { sid: customStageId, left: MAXQ, found: [], log: [], asked: [], tries: [], extra: 0 };
-      
-      $('sTag').textContent = 'AI 맞춤형 복습 코너';
-      $('sTitle').textContent = qz.title;
-      $('sComic').innerHTML = '<div class="card" style="text-align:center;padding:24px"><p><b>🤖 AI 맞춤 복습 문제</b></p><p class="sub" style="margin-top:6px">이전에 틀렸던 학습 기록을 바탕으로 출제된 문제입니다.</p></div>';
-      $('sQ').textContent = qz.q;
-      
-      go('stage');
-      toast('맞춤형 문제가 준비되었어요!');
-
-    } else {
-      // 403 에러(학습 기록 부족 등)인 경우 서버가 보낸 에러 메시지 출력
-      alert(result.error || '맞춤형 문제를 불러오는 데 실패했습니다. 학습을 더 진행해 주세요!');
-    }
-
+    if (!result.success) console.warn('정답 공개 기록 저장 실패:', result.error);
+    else reconcileWithServer(stageId, result.data, localXp);
   } catch (error) {
-    console.error('맞춤형 문제 통신 에러:', error);
-    alert('서버와 통신 중 오류가 발생했습니다.');
+    console.error('서버 통신 실패:', error);
   }
+}
+
+// [팀원 B 파트] 각 챕터 4단계(AI 맞춤 문제): 서버에서 LLM 문제를 받아 그 단계 객체에 채워 넣고 문제 화면을 연다.
+// - 단계 id(예: 'j2-4')를 그대로 쓰므로 클리어 기록·잠금 해제가 다른 단계와 똑같이 동작한다.
+// - 한 번 받은 문제는 새로고침 전까지 재사용한다(LLM 호출 최소화, 오답 후 재도전 때 문제가 바뀌지 않게).
+const shuffle = a => { const b = a.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+let customLoading = false;
+async function loadCustomQuiz(sid) {
+  const x = findStage(sid);
+  if (!x || !x.s.custom) return;
+  const s = x.s;
+  const fresh = !s.generated;
+
+  if (fresh) {
+    if (customLoading) return;           // 로딩 중 중복 클릭 방지
+    customLoading = true;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);   // LLM 응답 최대 60초
+    try {
+      const userId = (me && me.email) ? me.email : 'guest';
+      toast('AI가 맞춤형 문항을 구성하고 있어요 (약간의 시간이 걸려요)...');
+
+      const response = await fetch('/api/quiz/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, chapter_id: x.ch.id }),   // 이 챕터에서 틀린 주제로 출제
+        signal: controller.signal
+      });
+      const result = await response.json();
+      const qz = result.quiz;
+
+      if (response.status === 403) {
+        // 이 기기 기록과 서버 기록이 어긋난 경우(동기화 실패 등) → 서버 기준으로 다시 맞추고 지도를 새로 그린다
+        await syncClearsFromServer(8000);
+        if (cur.course) openCourse(cur.course);
+        toast('서버 기록상 이 챕터의 1~3단계가 아직 다 클리어되지 않았어요');
+        return;
+      }
+      if (!result.success || !qz) {
+        // 403: 학습 기록 부족 등 — 서버가 보낸 안내 문구를 그대로 보여준다
+        alert(result.error || '맞춤형 문제를 불러오는 데 실패했습니다. 학습을 더 진행해 주세요!');
+        return;
+      }
+      // 정답이 하나도 없는 문제는 풀 수 없으므로 거른다
+      if (!qz.q || !Array.isArray(qz.opts) || !qz.opts.every(o => Array.isArray(o) && o[0]) || qz.opts.filter(o => o[1]).length !== 1) {
+        alert('맞춤형 문제 형식이 올바르지 않아요. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      Object.assign(s, {
+        heading: qz.title || 'AI 맞춤 복습 문제',
+        q: qz.q,
+        opts: shuffle(qz.opts),          // LLM 은 정답을 1번에 두는 경향이 있어 섞는다
+        explain: qz.explain || '',
+        laws: Array.isArray(qz.laws) ? qz.laws : [],
+        clues: [{ id: 'c1', label: '핵심 법령 확인', hint: '적용되는 법령 조항을 확인해보세요.', kw: ['법령', '조항'], fact: qz.explain, reveal: qz.explain }],
+        reviewMode: !!(result.meta && result.meta.mode === 'review'),   // 틀린 문제가 없어 심화 복습으로 출제된 경우
+        generated: true
+      });
+    } catch (error) {
+      console.error('맞춤형 문제 통신 에러:', error);
+      alert(error.name === 'AbortError' ? '맞춤형 문제를 만드는 데 시간이 오래 걸려요. 잠시 후 다시 시도해 주세요.' : '서버와 통신 중 오류가 발생했습니다.');
+      return;
+    } finally {
+      clearTimeout(timeoutId);
+      customLoading = false;
+    }
+  }
+
+  run = { sid, left: MAXQ, found: [], log: [], asked: [], tries: [], extra: 0 };
+  $('sTag').textContent = `${x.c.name} · ${x.ch.title} · ${x.i + 1}단계 · AI 맞춤`;
+  $('sTitle').textContent = s.heading;
+  $('sComic').innerHTML = '<div class="card" style="text-align:center;padding:24px"><p><b>🤖 AI 맞춤 복습 문제</b></p><p class="sub" style="margin-top:6px">' + (s.reviewMode ? '이 챕터를 모두 맞힌 도전자를 위한 심화 복습 문제예요.' : '이 챕터에서 틀렸던 주제를 바탕으로 출제된 문제예요.') + '</p></div>';
+  $('sQ').textContent = s.q;
+  go('stage');
+  if (fresh) toast('맞춤형 문제가 준비되었어요!');
 }
 
 function pick(k){
@@ -409,8 +529,6 @@ function pick(k){
   const firstTry = run.tries.length===1;
   const already = pg.cleared[s.id];
   let reward = null;
-
-  submitQuizResult(s.id, x.c.id, right, run.tries.length);
 
   if(right){
     const nf = run.found.length;
@@ -427,6 +545,7 @@ function pick(k){
   } else {
     pg.hist.unshift({sid:s.id, grade:'-', ok:false, at:today()}); pg.hist = pg.hist.slice(0,30); saveProgress();
   }
+  submitQuizResult(s.id, s.custom ? 'custom' : x.c.id, right, run.tries.length, run.found.length, run.left, reward ? reward.xp : 0);
   renderFeedback(k, right, reward);
   go('feedback');
   aiFeedback(k, right);
@@ -457,7 +576,7 @@ function retry(){ run.left += 3; run.extra += 3; run.log.push({who:'bot', text:'
 function reveal(){
   const x = findStage(run.sid), s = x.s, k = s.opts.findIndex(o=>o[1]);
   let reward = null;
-  if(!pg.cleared[s.id]){ pg.xp += 5; pg.cleared[s.id] = {grade:'C', at:today()}; reward = {xp:5, coin:0, grade:'C'}; saveProgress(); }
+  if(!pg.cleared[s.id]){ pg.xp += 5; pg.cleared[s.id] = {grade:'C', at:today()}; reward = {xp:5, coin:0, grade:'C'}; saveProgress(); submitReveal(s.id, s.custom ? 'custom' : x.c.id, 5); }
   run.tries.push(k);
   renderFeedback(k, true, reward);
   $('fVerdict').className = 'verdict no';
@@ -468,7 +587,7 @@ function reveal(){
   if(reward) setTimeout(() => showReward(reward, x), 300);
 }
 function showReward(r, x){
-  const chDone = x.ch.stages.every(s=>pg.cleared[s.id]);
+  const chDone = requiredStages(x.ch).every(s=>pg.cleared[s.id]);
   let badge = '';
   if(chDone && !pg.badges.includes(x.ch.id)){ pg.badges.push(x.ch.id); pg.coins += 50; saveProgress(); badge = `<p style="font-weight:700">챕터 클리어! 배지 "${esc(x.ch.title.split(':')[0])}"와 보너스 50 코인을 받았어요.</p>`; }
   const before = level(pg.xp - r.xp).lv, after = level(pg.xp).lv;
