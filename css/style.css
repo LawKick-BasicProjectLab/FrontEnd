@@ -14,14 +14,14 @@
   --comic:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   --fs:15px;
 }
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#11141d; --card:#1a1f2d; --ink:#e8ebf5; --sub:#9aa3bd; --line:#2b3245;
   --brand:#7d93ff; --brand-soft:#232c4d; --on-brand:#0f1324;
   --hot:#ff8a63; --hot-soft:#3a2219; --good:#4cc78f; --good-soft:#173328; --bad:#ff7b80; --bad-soft:#3a1d20;
   --gold:#ffc94d; --gold-soft:#3a3016; --clue:#3a3016; --clue-ink:#ffd77a; --me:#5f78ff; --bot:#232a3c;
   --sc-sky:#2b3a66; --sc-wall:#3a3631; --sc-floor:#4a3f33; --sc-acc:#46598f; --sc-win:#c9d6ff; --sc-dark:#0c1124; --sc-desk:#6e5638; --sc-shelf:#2a3247;
   --panel-line:#8d97b5; color-scheme:dark}}
-:root[data-theme="light"]{
+:root[data-theme="dark"]{
   --bg:#11141d; --card:#1a1f2d; --ink:#e8ebf5; --sub:#9aa3bd; --line:#2b3245;
   --brand:#7d93ff; --brand-soft:#232c4d; --on-brand:#0f1324;
   --hot:#ff8a63; --hot-soft:#3a2219; --good:#4cc78f; --good-soft:#173328; --bad:#ff7b80; --bad-soft:#3a1d20;
@@ -161,8 +161,14 @@ p{margin:0}
 .thumb{aspect-ratio:9/16;max-width:100%;border:0;border-radius:12px;padding:10px 8px;color:#fff;text-align:left;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;position:relative;overflow:hidden}
 .thumb b{font-family:var(--display);font-weight:400;font-size:15px;line-height:1.25}
 .thumb small{font-size:10.5px;opacity:.85}
-.thumb.lock{filter:grayscale(1);opacity:.55}
+.thumb.lock{filter:grayscale(1);opacity:.55;cursor:pointer}
 .thumb .seen{position:absolute;top:8px;right:8px;font-size:10px;background:rgba(0,0,0,.35);padding:2px 6px;border-radius:99px}
+/* 그림 썸네일: 그림 안에 챕터 번호·제목이 이미 있으므로 글자는 아래 한 줄(길이·잠금 안내)만 얹는다 */
+.thumb.has-img{padding:0;background:#1a1d26;justify-content:flex-end}
+.thumb.has-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumb.has-img .seen{z-index:2;background:rgba(0,0,0,.55)}
+.thumb.lock-img img{opacity:.8}
+.vh{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .c-jeonse{background:linear-gradient(160deg,#2f4bd6,#1a2a7a)} .c-work{background:linear-gradient(160deg,#e0663f,#8f2f17)} .c-used{background:linear-gradient(160deg,#16936a,#0b4a35)}
 
 /* 랭킹 */
@@ -211,6 +217,24 @@ p{margin:0}
 .slide>*{animation:rise .5s both}
 .slide .big{animation-delay:.08s} .slide .body{animation-delay:.18s} .slide .viz{animation-delay:.28s}
 @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+/* 만화 슬라이드: 위쪽 진행 막대·버튼 줄(58px)은 만화 바깥에 두고, 그 아래를 정확히 9:16 칸으로 만들어 만화를 통째로 보여준다
+   → 위아래가 버튼에 가리거나 잘리지 않고, 좌우 여백도 없다 */
+.reel.has-comic{padding-top:58px;aspect-ratio:auto;height:auto;max-height:none;
+  width:min(100%, calc((min(100vh, 918px) - 58px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) * 9 / 16));
+  width:min(100%, calc((min(100dvh, 918px) - 58px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) * 9 / 16))}
+.slide.comic{position:relative;inset:auto;padding:0;width:100%;aspect-ratio:9/16;height:auto}
+.slide.comic img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;animation:none}   /* contain: 어떤 경우에도 그림이 잘리지 않게 */
+.reel.has-comic .wm{display:none}
+/* 만화 뒤 여백(위쪽 버튼 줄 등)은 그 만화를 흐리게 깔아 반투명 유리처럼 */
+.reel.has-comic::before{content:"";position:absolute;inset:-40px;background:var(--comic-bg) center/cover no-repeat;filter:blur(24px) saturate(.9) brightness(.9);z-index:0;pointer-events:none}
+.reel.has-comic::after{content:"";position:absolute;left:0;right:0;top:0;height:58px;background:rgba(255,255,255,.16);border-bottom:1px solid rgba(255,255,255,.3);box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:1;pointer-events:none}
+.reel.has-comic .top{text-shadow:0 1px 3px rgba(0,0,0,.45)}
+/* 만화 아래쪽 자막 띠를 가리지 않도록: 재생·읽어주기는 위로, 마지막 버튼은 다 본 뒤에 */
+.reel .topbtns{display:flex;gap:6px;align-items:center}
+.reel .topbtns button{min-width:32px}
+.reel.has-comic .tapL,.reel.has-comic .tapR{bottom:90px}
+.reel.has-comic .bottom .btn{opacity:0;pointer-events:none;transform:translateY(8px);transition:opacity .3s,transform .3s;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.reel.has-comic.ended .bottom .btn{opacity:1;pointer-events:auto;transform:none}
 .reel .tapL,.reel .tapR{position:absolute;top:60px;bottom:110px;width:40%;z-index:2;background:none;border:0;cursor:pointer}
 .reel .tapL{left:0}.reel .tapR{right:0}
 .reel .bottom{position:absolute;left:16px;right:16px;bottom:22px;z-index:3;display:flex;flex-direction:column;gap:8px}
@@ -225,7 +249,7 @@ p{margin:0}
 @keyframes pop{from{transform:scale(.85);opacity:0}to{transform:none;opacity:1}}
 .rewards{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
 .rewards span{background:var(--gold-soft);color:var(--gold);font-weight:700;border-radius:12px;padding:8px 12px;font-variant-numeric:tabular-nums}
-.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translate(-50%,-90px);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:99px;font-size:13.5px;font-weight:700;transition:transform .3s;z-index:40}
+.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translate(-50%,-90px);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:18px;font-size:13.5px;font-weight:700;transition:transform .3s;z-index:40;width:max-content;max-width:calc(100vw - 32px);text-align:center;line-height:1.45}
 .toast.show{transform:translate(-50%,0)}
 .note{font-size:12px;color:var(--sub);text-align:center}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
