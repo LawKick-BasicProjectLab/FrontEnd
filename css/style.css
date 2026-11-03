@@ -14,14 +14,14 @@
   --comic:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   --fs:15px;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
   --bg:#11141d; --card:#1a1f2d; --ink:#e8ebf5; --sub:#9aa3bd; --line:#2b3245;
   --brand:#7d93ff; --brand-soft:#232c4d; --on-brand:#0f1324;
   --hot:#ff8a63; --hot-soft:#3a2219; --good:#4cc78f; --good-soft:#173328; --bad:#ff7b80; --bad-soft:#3a1d20;
   --gold:#ffc94d; --gold-soft:#3a3016; --clue:#3a3016; --clue-ink:#ffd77a; --me:#5f78ff; --bot:#232a3c;
   --sc-sky:#2b3a66; --sc-wall:#3a3631; --sc-floor:#4a3f33; --sc-acc:#46598f; --sc-win:#c9d6ff; --sc-dark:#0c1124; --sc-desk:#6e5638; --sc-shelf:#2a3247;
   --panel-line:#8d97b5; color-scheme:dark}}
-:root[data-theme="dark"]{
+:root[data-theme="light"]{
   --bg:#11141d; --card:#1a1f2d; --ink:#e8ebf5; --sub:#9aa3bd; --line:#2b3245;
   --brand:#7d93ff; --brand-soft:#232c4d; --on-brand:#0f1324;
   --hot:#ff8a63; --hot-soft:#3a2219; --good:#4cc78f; --good-soft:#173328; --bad:#ff7b80; --bad-soft:#3a1d20;
@@ -81,7 +81,7 @@ p{margin:0}
 .course b{display:block;font-size:16.5px}
 .mini{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}
 .mini i{display:block;height:100%;background:var(--brand)}
-.next{display:flex;gap:12px;align-items:center;background:var(--hot-soft);border-radius:16px;padding:14px;cursor:pointer;width:100%;border:0;text-align:left}
+.next{display:flex;gap:12px;align-items:center;background:var(--hot-soft);border-radius:19px;padding:18px;cursor:pointer;width:100%;border:1px solid #E85B2A; box-shadow: 0 3px 14px rgba(31, 48, 90, .045);text-align:left;transition: transform .15s, box-shadow .15s;}
 .next .go{margin-left:auto;font-weight:700;color:var(--hot);white-space:nowrap}
 
 /* 코스 지도 */
@@ -229,3 +229,107 @@ p{margin:0}
 .toast.show{transform:translate(-50%,0)}
 .note{font-size:12px;color:var(--sub);text-align:center}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+
+
+/* 클릭 가능한 요소 */
+button,
+a,
+.course,
+.next,
+.node,
+.chap:not(.locked),
+.shortbtn,
+.thumb:not(.lock),
+.opt,
+.chip,
+.hist,
+.tab,
+.fsbar button,
+.reel button,
+.modal button {
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .15s ease;
+}
+
+/* 터치 시 살짝 축소 */
+button:active:not(:disabled),
+a:active,
+.course:active,
+.next:active,
+.node:active:not(:disabled),
+.chap:not(.locked):active,
+.shortbtn:active,
+.thumb:not(.lock):active,
+.opt:active:not(:disabled),
+.chip:active,
+.hist:active,
+.tab:active,
+.fsbar button:active,
+.reel button:active,
+.modal button:active {
+  transform: scale(.985);
+}
+
+/* 비활성 요소 */
+button:disabled,
+.node:disabled,
+.chap.locked {
+  cursor: default;
+  transform: none;
+}
+
+/* 모바일 터치 최적화 */
+button,
+a,
+.course,
+.next,
+.node,
+.opt,
+.chip,
+.thumb {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 모션 최소화 설정 */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  a,
+  .course,
+  .next,
+  .node,
+  .chap,
+  .shortbtn,
+  .thumb,
+  .opt,
+  .chip,
+  .hist,
+  .tab {
+    transition: none !important;
+  }
+}
+
+/* 코스 SVG 아이콘 */
+.course .mk {
+  width: 53px;
+  height: 53px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.course .mk svg {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+.course-divider {
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+  margin: 8px 0 14px;
+  border-radius: 2px;
+}
