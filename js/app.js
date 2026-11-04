@@ -686,7 +686,7 @@ let reel = null;
 function chapterById(id){ for(const c of COURSES) for(const ch of c.chapters) if(ch.id===id) return {c, ch}; }
 function playShorts(chId, after){ const {c, ch} = chapterById(chId); openReel([{c, ch}], after); }
 function playAll(){
-  const list = []; COURSES.forEach(c => c.chapters.forEach((ch, ci) => { if(ch.shorts.length && (pg.seen[ch.id] || chapterOpen(c, ci))) list.push({c, ch}); }));
+  const list = []; COURSES.forEach(c => c.chapters.forEach((ch, ci) => { if(ch.shorts.length && chapterOpen(c, ci)) list.push({c, ch}); }));
   if(!list.length){ toast('아직 열린 쇼츠가 없어요'); return; }
   openReel(list);
 }
@@ -765,7 +765,8 @@ function renderShorts(){
       if(ch.thumbLock) return `<button class="thumb has-img lock-img c-${c.id}" ${attrs}>${imgCard(ch.thumbLock, ch.title)}</button>`;
       return `<button class="thumb c-${c.id} lock" ${attrs}><small>챕터 ${ci+1}</small><b>${esc(ch.title)}</b><small></small></button>`;
     }
-    const open = pg.seen[ch.id] || chapterOpen(c, ci);
+    // 열림 여부는 클리어 기록으로만 판단한다 (예전에 본 기록이 남아 있어도, 이전 챕터 클리어가 없으면 잠금)
+    const open = chapterOpen(c, ci);
     const pic = open ? ch.thumb : ch.thumbLock;
     const attrs = open
       ? `onclick="playShorts('${ch.id}')" aria-label="챕터 ${ci+1} ${esc(ch.title)} 쇼츠"`
